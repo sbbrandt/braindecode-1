@@ -308,10 +308,11 @@ class ThrowAwayIndexLoader(object):
             # TODO: should be on dataset side
             if hasattr(x, 'type'):
                 x = x.type(torch.float32)
-                if self.is_regression:
-                    y = y.type(torch.float32)
-                else:
-                    y = y.type(torch.int64)
+                if not isinstance(y, tuple):
+                    if self.is_regression:
+                        y = y.type(torch.float32)
+                    else:
+                        y = y.type(torch.int64)
             yield x, y
 
 
