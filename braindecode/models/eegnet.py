@@ -1,9 +1,14 @@
+# Authors: Robin Schirrmeister <robintibor@gmail.com>
+#
+# License: BSD (3-clause)
+
 import torch
 from torch import nn
 from torch.nn.functional import elu
 
-from .modules import Expression
+from .modules import Expression, Ensure4d
 from .functions import squeeze_final_output
+
 
 class Conv2dWithConstraint(nn.Conv2d):
     def __init__(self, *args, max_norm=1, **kwargs):
@@ -66,6 +71,7 @@ class EEGNetv4(nn.Sequential):
         self.drop_prob = drop_prob
 
         pool_class = dict(max=nn.MaxPool2d, mean=nn.AvgPool2d)[self.pool_mode]
+        self.add_module("ensuredims", Ensure4d())
         # b c 0 1
         # now to b 1 0 c
         self.add_module("dimshuffle", Expression(_transpose_to_b_1_c_0))
@@ -224,6 +230,7 @@ class EEGNetv1(nn.Sequential):
         self.drop_prob = drop_prob
 
         pool_class = dict(max=nn.MaxPool2d, mean=nn.AvgPool2d)[self.pool_mode]
+        self.add_module("ensuredims", Ensure4d())
         n_filters_1 = 16
         self.add_module(
             "conv_1",
@@ -288,8 +295,8 @@ class EEGNetv1(nn.Sequential):
 
         out = self(
             torch.ones(
-                    (1, self.in_chans, self.input_window_samples, 1),
-                    dtype=torch.float32,
+                (1, self.in_chans, self.input_window_samples, 1),
+                dtype=torch.float32,
             )
         )
         n_out_virtual_chans = out.cpu().data.numpy().shape[2]
@@ -315,6 +322,7 @@ class EEGNetv1(nn.Sequential):
         )
         self.add_module("squeeze", Expression(squeeze_final_output))
         _glorot_weight_zero_bias(self)
+
 
 def _glorot_weight_zero_bias(model):
     """Initalize parameters of all modules by initializing weights with

@@ -1,10 +1,17 @@
+# Authors: Robin Schirrmeister <robintibor@gmail.com>
+#
+# License: BSD (3-clause)
+
+import glob
 import os
 import random
+from warnings import warn
 
-import numpy as np
-import mne
 import h5py
+import mne
+import numpy as np
 import torch
+from sklearn.utils import check_random_state
 
 
 def set_random_seeds(seed, cuda):
@@ -25,6 +32,16 @@ def set_random_seeds(seed, cuda):
 
 
 def np_to_var(
+    X, requires_grad=False, dtype=None, pin_memory=False, **tensor_kwargs
+):
+    warn("np_to_var has been renamed np_to_th, please use np_to_th instead")
+    return np_to_th(
+        X, requires_grad=requires_grad, dtype=dtype, pin_memory=pin_memory,
+        **tensor_kwargs
+    )
+
+
+def np_to_th(
     X, requires_grad=False, dtype=None, pin_memory=False, **tensor_kwargs
 ):
     """
@@ -58,6 +75,11 @@ def np_to_var(
 
 
 def var_to_np(var):
+    warn("var_to_np has been renamed th_to_np, please use th_to_np instead")
+    return th_to_np(var)
+
+
+def th_to_np(var):
     """Convenience function to transform `torch.Tensor` to numpy
     array.
 
@@ -219,7 +241,7 @@ def get_balanced_batches(
 
 def create_mne_dummy_raw(n_channels, n_times, sfreq, include_anns=True,
                          description=None, savedir=None, save_format='fif',
-                         overwrite=True):
+                         overwrite=True, random_state=None):
     """Create an mne.io.RawArray with fake data, and optionally save it.
 
     This will overwrite already existing files.
@@ -242,6 +264,8 @@ def create_mne_dummy_raw(n_channels, n_times, sfreq, include_anns=True,
     save_format : str | list
         If `savedir` is provided, this specifies the file format the data should
         be saved to. Can be 'raw' or 'hdf5', or a list containing both.
+    random_state : int | RandomState
+        Random state for the generation of random data.
 
     Returns
     -------
@@ -250,7 +274,8 @@ def create_mne_dummy_raw(n_channels, n_times, sfreq, include_anns=True,
     save_fname : dict | None
         Dictionary containing the name the raw data was saved to.
     """
-    data = np.random.rand(n_channels, n_times)
+    random_state = check_random_state(random_state)
+    data = random_state.rand(n_channels, n_times)
     ch_names = [f'ch{i}' for i in range(n_channels)]
     ch_types = ['eeg'] * n_channels
     info = mne.create_info(ch_names=ch_names, sfreq=sfreq, ch_types=ch_types)
@@ -320,10 +345,34 @@ def update_estimator_docstring(base_class, docstring):
     idx = base_doc.find('callbacks:')
     idx_end = idx + base_doc[idx:].find('\n\n')
     # remove callback descripiton already included in braindecode docstring
-    filtered_doc = base_doc[:idx] + base_doc[idx_end+6:]
+    filtered_doc = base_doc[:idx] + base_doc[idx_end + 6:]
     splitted = docstring.split('Parameters\n    ----------\n    ')
-    out_docstring = splitted[0] + \
-                    filtered_doc[filtered_doc.find('Parameters'):filtered_doc.find('Attributes')] + \
-                    splitted[1] + \
-                    filtered_doc[filtered_doc.find('Attributes'):]
+    out_docstring = (
+        splitted[0] +
+        filtered_doc[filtered_doc.find('Parameters'):filtered_doc.find('Attributes')] +
+        splitted[1] +
+        filtered_doc[filtered_doc.find('Attributes'):])
     return out_docstring
+
+
+def read_all_file_names(directory, extension):
+    """Read all files with specified extension from given path and sorts them
+    based on a given sorting key.
+
+    Parameters
+    ----------
+    directory: str
+        Parent directory to be searched for files of the specified type.
+    extension: str
+        File extension, i.e. ".edf" or ".txt".
+
+    Returns
+    -------
+    file_paths: list(str)
+        List of all files found in (sub)directories of path.
+    """
+    assert extension.startswith('.')
+    file_paths = glob.glob(directory + '**/*' + extension, recursive=True)
+    assert len(file_paths) > 0, (
+        f'something went wrong. Found no {extension} files in {directory}')
+    return file_paths

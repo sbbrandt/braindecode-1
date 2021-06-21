@@ -133,7 +133,6 @@ class CroppedTrialEpochScoring(EpochScoring):
         if not self.on_train:
             self.window_inds_ = []
 
-
     def _initialize_cache(self):
         super()._initialize_cache()
         self.crops_to_trials_computed = False
@@ -143,7 +142,7 @@ class CroppedTrialEpochScoring(EpochScoring):
             self.window_inds_ = []
 
     def on_epoch_end(self, net, dataset_train, dataset_valid, **kwargs):
-        assert self.use_caching == True
+        assert self.use_caching
         if not self.crops_to_trials_computed:
             if self.on_train:
                 # Prevent that rng state of torch is changed by
@@ -165,7 +164,6 @@ class CroppedTrialEpochScoring(EpochScoring):
                 pred_results['window_ys'] = np.concatenate(
                     [y.cpu().numpy() for y in self.y_trues_])
 
-
             # A new trial starts
             # when the index of the window in trials
             # does not increment by 1
@@ -177,15 +175,18 @@ class CroppedTrialEpochScoring(EpochScoring):
                 pred_results['preds'],
                 pred_results['i_window_in_trials'],
                 pred_results['i_window_stops'])
-            # trial preds is a list
-            # each item is an 2darray classes x time
+
+            # Average across the timesteps of each trial so we have per-trial
+            # predictions already, these will be just passed through the forward
+            # method of the classifier/regressor to the skorch scoring function.
+            # trial_preds is a list, each item is a 2d array classes x time
             y_preds_per_trial = np.array(
                 [np.mean(p, axis=1) for p in trial_preds]
             )
             # Move into format expected by skorch (list of torch tensors)
             y_preds_per_trial = [torch.tensor(y_preds_per_trial)]
 
-            # Store the computed trial labels/preds for all Cropped Callbacks
+            # Store the computed trial preds for all Cropped Callbacks
             # that are also on same set
             cbs = net._default_callbacks + net.callbacks
             epoch_cbs = [

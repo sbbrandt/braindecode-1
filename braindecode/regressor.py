@@ -1,9 +1,14 @@
+# Authors: Maciej Sliwowski <maciek.sliwowski@gmail.com>
+#          Robin Schirrmeister <robintibor@gmail.com>
+#
+# License: BSD (3-clause)
+
 import numpy as np
 from sklearn.metrics import get_scorer
 from skorch.callbacks import EpochTimer, BatchScoring, PrintLog, EpochScoring
 from skorch.classifier import NeuralNet
 from skorch.regressor import NeuralNetRegressor
-from skorch.utils import train_loss_score, valid_loss_score, noop
+from skorch.utils import train_loss_score, valid_loss_score, noop, to_numpy
 
 from .training.scoring import PostEpochTrainScoring, CroppedTrialEpochScoring
 from .util import ThrowAwayIndexLoader, update_estimator_docstring
@@ -38,7 +43,7 @@ class EEGRegressor(NeuralNetRegressor):
         Defines whether train dataset will be shuffled. As skorch does not
         shuffle the train dataset by default this one overwrites this option.
 
-    """
+    """  # noqa: E501
     __doc__ = update_estimator_docstring(NeuralNetRegressor, doc)
 
     def __init__(self, *args, cropped=False, callbacks=None,
@@ -64,7 +69,7 @@ class EEGRegressor(NeuralNetRegressor):
                     assert scoring_name.endswith(
                         ('_score', '_error', '_deviance', '_loss'))
                     if (scoring_name.endswith('_score') or
-                        callback.startswith('neg_')):
+                            callback.startswith('neg_')):
                         lower_is_better = False
                     else:
                         lower_is_better = True
@@ -134,7 +139,7 @@ class EEGRegressor(NeuralNetRegressor):
             epoch_cbs = []
             for name, cb in cbs:
                 if (cb.__class__.__name__ == 'CroppedTrialEpochScoring') and (
-                    hasattr(cb, 'window_inds_')) and (cb.on_train == False):
+                        hasattr(cb, 'window_inds_')) and (not cb.on_train):
                     epoch_cbs.append(cb)
             # for trialwise decoding stuffs it might also be we don't have
             # cropped loader, so no indices there
@@ -152,7 +157,7 @@ class EEGRegressor(NeuralNetRegressor):
         for X, y, i in self.get_iterator(dataset, drop_index=False):
             i_window_in_trials.append(i[0].cpu().numpy())
             i_window_stops.append(i[2].cpu().numpy())
-            preds.append(self.predict_proba(X))
+            preds.append(to_numpy(self.forward(X)))
             window_ys.append(y.cpu().numpy())
         preds = np.concatenate(preds)
         i_window_in_trials = np.concatenate(i_window_in_trials)
@@ -185,3 +190,56 @@ class EEGRegressor(NeuralNetRegressor):
             ),
             ("print_log", PrintLog()),
         ]
+
+    # Method added to fix `predict_proba` behavior to return proper values
+    # in cropped mode even if regressor does not return probabilities.
+    # We implement `predict_proba` because it exists in skorch.NeuralNetRegressor.
+    def predict_proba(self, X):
+        """Return the output of the module's forward method as a numpy
+        array. In case of cropped decoding returns averaged values for
+        each trial.
+
+        If the module's forward method returns multiple outputs as a
+        tuple, it is assumed that the first output contains the
+        relevant information and the other values are ignored.
+        If all values are relevant or module's output for each crop
+        is needed, consider using :func:`~skorch.NeuralNet.forward`
+        instead.
+
+        Parameters
+        ----------
+        X : input data, compatible with skorch.dataset.Dataset
+          By default, you should be able to pass:
+
+            * numpy arrays
+            * torch tensors
+            * pandas DataFrame or Series
+            * scipy sparse CSR matrices
+            * a dictionary of the former three
+            * a list/tuple of the former three
+            * a Dataset
+
+          If this doesn't work with your data, you have to pass a
+          ``Dataset`` that can deal with the data.
+
+        Warnings
+        --------
+        Regressors predict regression targets, so output of this method
+        can't be interpreted as probabilities. We advise you to use
+        `predict` method instead of `predict_proba`.
+
+        Returns
+        -------
+        y_proba : numpy ndarray
+
+        """
+        y_pred = super().predict_proba(X)
+        # Normally, we have to average the predictions across crops/timesteps
+        # to get one prediction per window/trial
+        # Predictions may be already averaged in CroppedTrialEpochScoring (y_pred.shape==2).
+        # However, when predictions are computed outside of CroppedTrialEpochScoring
+        # we have to average predictions, hence the check if len(y_pred.shape) == 3
+        if self.cropped and len(y_pred.shape) == 3:
+            return y_pred.mean(-1)
+        else:
+            return y_pred
